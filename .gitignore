@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.pyc
+
+# Unity
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+[Uu]ser[Ss]ettings/
+[Mm]emoryCaptures/
+[Rr]ecordings/
+
+# IDE / OS
+.vs/
+.idea/
+.vscode/
+*.csproj
+*.unityproj
+*.sln
+*.suo
+*.tmp
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+.DS_Store
+Thumbs.db
+sysinfo.txt
+crashlytics-buildid.txt
+*.apk
+*.aab
+*.unitypackage
+~UnityDirMonSyncFile~*
+
+# Personal reference photos. Never commit these.
+cat1-orange-tabby.jpg
+cat2-orange-white.jpg
+dog1-from-ig.jpg
+dog2-from-ig.jpg
+dog3-from-ig.jpg
+cat-refs/
