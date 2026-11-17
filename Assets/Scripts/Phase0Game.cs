@@ -64,6 +64,13 @@ public class Phase0Game : MonoBehaviour
     float flashLife;
     float ballPunch;
     bool serveArmed;
+    float padMove;
+    bool padJumpDown;
+    bool padHitDown;
+    bool padLeftHeld;
+    bool padRightHeld;
+    bool padJumpHeld;
+    bool padHitHeld;
     readonly List<Floater> floaters = new List<Floater>();
     bool artMissing;
 
@@ -85,6 +92,7 @@ public class Phase0Game : MonoBehaviour
     {
         Time.timeScale = 1f;
         Application.targetFrameRate = 60;
+        LockLandscape();
         font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
         if (font == null) font = Resources.GetBuiltinResource<Font>("Arial.ttf");
         EnsureCamera();
@@ -375,7 +383,7 @@ public class Phase0Game : MonoBehaviour
         cpu.hitBuffer = 0f;
         Athlete server = serverSide < 0 ? player : cpu;
         banner = serverSide < 0 ? "Your serve" : "AI serve";
-        bannerSub = "Hit to send it over";
+        bannerSub = serverSide < 0 ? "Tap SERVE or press F" : "Get ready";
     }
 
     void StartMatch(int mascot)
@@ -391,7 +399,7 @@ public class Phase0Game : MonoBehaviour
         Play(sndUi, 0.5f);
         BeginServe();
         banner = Mascots.All[playerMascot].displayName + "  vs  " + Mascots.All[aiMascot].displayName;
-        bannerSub = "First to 7, win by 2, cap 10";
+        bannerSub = "Tap SERVE or press F";
         timer = -0.4f;
     }
 
@@ -399,6 +407,7 @@ public class Phase0Game : MonoBehaviour
     {
         float dt = Mathf.Min(Time.deltaTime, 0.033f);
         FitCamera();
+        SamplePads();
         if (mode == Mode.Select)
         {
             if (Input.GetKeyDown(KeyCode.Alpha1) || Input.GetKeyDown(KeyCode.Keypad1)) StartMatch(0);
@@ -440,12 +449,14 @@ public class Phase0Game : MonoBehaviour
         float move = 0f;
         if (Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.LeftArrow)) move -= 1f;
         if (Input.GetKey(KeyCode.D) || Input.GetKey(KeyCode.RightArrow)) move += 1f;
-        player.move = move;
-        if (Input.GetKeyDown(KeyCode.W) || Input.GetKeyDown(KeyCode.UpArrow) || Input.GetKeyDown(KeyCode.Space))
+        if (Mathf.Abs(move) < 0.01f) move = padMove;
+        player.move = Mathf.Clamp(move, -1f, 1f);
+        if (Input.GetKeyDown(KeyCode.W) || Input.GetKeyDown(KeyCode.UpArrow) || Input.GetKeyDown(KeyCode.Space) || padJumpDown)
             player.jumpPressed = true;
-        if (mode == Mode.Serve && serverSide < 0 && HitPressed())
+        bool hit = HitPressed() || padHitDown;
+        if (mode == Mode.Serve && serverSide < 0 && hit)
             serveArmed = true;
-        else if (player.hitLock <= 0f && HitPressed())
+        else if (player.hitLock <= 0f && hit)
             player.hitBuffer = 0.16f;
     }
 
@@ -763,10 +774,135 @@ public class Phase0Game : MonoBehaviour
         return null;
     }
 
+    struct Pads
+    {
+        public Rect left;
+        public Rect right;
+        public Rect jump;
+        public Rect hit;
+        public bool show;
+    }
+
+    static void LockLandscape()
+    {
+        Screen.autorotateToPortrait = false;
+        Screen.autorotateToPortraitUpsideDown = false;
+        Screen.autorotateToLandscapeLeft = true;
+        Screen.autorotateToLandscapeRight = true;
+#if UNITY_IOS
+        Screen.orientation = ScreenOrientation.AutoRotation;
+#endif
+    }
+
+    Pads LayoutPads()
+    {
+        Rect safe = Screen.safeArea;
+        float margin = Mathf.Max(10f, Screen.height * 0.025f);
+        float gap = Mathf.Max(8f, Screen.height * 0.02f);
+        float width = Mathf.Max(1f, safe.width);
+        float btn = Mathf.Min(Screen.height * 0.22f, (width - margin * 4f - gap * 2f - 120f) / 4f);
+        btn = Mathf.Clamp(btn, 84f, 120f);
+        float y = Screen.height - safe.yMin - margin - btn;
+        float leftX = safe.xMin + margin;
+        float rightEdge = safe.xMax - margin;
+        Pads p = new Pads();
+        p.left = new Rect(leftX, y, btn, btn);
+        p.right = new Rect(leftX + btn + gap, y, btn, btn);
+        p.hit = new Rect(rightEdge - btn, y, btn, btn);
+        p.jump = new Rect(rightEdge - btn * 2f - gap, y, btn, btn);
+        p.show = mode == Mode.Serve || mode == Mode.Rally || mode == Mode.Point;
+        return p;
+    }
+
+    void SamplePads()
+    {
+        padMove = 0f;
+        padJumpDown = false;
+        padHitDown = false;
+        padLeftHeld = false;
+        padRightHeld = false;
+        padJumpHeld = false;
+        padHitHeld = false;
+        Pads pads = LayoutPads();
+        if (!pads.show) return;
+
+        if (Input.touchCount > 0)
+        {
+            for (int i = 0; i < Input.touchCount; i++)
+            {
+                Touch t = Input.GetTouch(i);
+                if (t.phase == TouchPhase.Ended || t.phase == TouchPhase.Canceled) continue;
+                Vector2 gui = ToGui(t.position);
+                bool began = t.phase == TouchPhase.Began;
+                NotePad(pads, gui, began);
+            }
+        }
+        else if (Input.GetMouseButton(0))
+        {
+            NotePad(pads, ToGui(Input.mousePosition), Input.GetMouseButtonDown(0));
+        }
+
+        padMove = Mathf.Clamp(padMove, -1f, 1f);
+    }
+
+    void NotePad(Pads pads, Vector2 gui, bool began)
+    {
+        if (pads.left.Contains(gui))
+        {
+            padLeftHeld = true;
+            padMove -= 1f;
+        }
+        if (pads.right.Contains(gui))
+        {
+            padRightHeld = true;
+            padMove += 1f;
+        }
+        if (pads.jump.Contains(gui))
+        {
+            padJumpHeld = true;
+            if (began) padJumpDown = true;
+        }
+        if (pads.hit.Contains(gui))
+        {
+            padHitHeld = true;
+            if (began) padHitDown = true;
+        }
+    }
+
+    static Vector2 ToGui(Vector2 screenBottomLeft)
+    {
+        return new Vector2(screenBottomLeft.x, Screen.height - screenBottomLeft.y);
+    }
+
+    void DrawPads()
+    {
+        Pads pads = LayoutPads();
+        if (!pads.show) return;
+        DrawPad(pads.left, "◀", padLeftHeld, new Color(0.16f, 0.45f, 0.48f, 0.82f));
+        DrawPad(pads.right, "▶", padRightHeld, new Color(0.16f, 0.45f, 0.48f, 0.82f));
+        DrawPad(pads.jump, "JUMP", padJumpHeld, new Color(0.93f, 0.72f, 0.28f, 0.9f));
+        string hitLabel = mode == Mode.Serve && serverSide < 0 ? "SERVE" : "HIT";
+        DrawPad(pads.hit, hitLabel, padHitHeld, new Color(0.90f, 0.38f, 0.26f, 0.9f));
+    }
+
+    void DrawPad(Rect r, string label, bool held, Color fill)
+    {
+        Color ink = new Color(0.18f, 0.1f, 0.08f, 1f);
+        GUI.color = new Color(0f, 0f, 0f, 0.35f);
+        GUI.DrawTexture(new Rect(r.x - 3f, r.y - 3f, r.width + 6f, r.height + 6f), Texture2D.whiteTexture);
+        GUI.color = held ? Color.Lerp(fill, Color.white, 0.38f) : fill;
+        GUI.DrawTexture(r, Texture2D.whiteTexture);
+        GUI.color = Color.white;
+        int size = label.Length > 2 ? Mathf.RoundToInt(r.height * 0.28f) : Mathf.RoundToInt(r.height * 0.46f);
+        GUIStyle st = Style(Mathf.Max(18, size), ink, TextAnchor.MiddleCenter);
+        GUI.Label(r, label, st);
+    }
+
     void OnGUI()
     {
         if (mode == Mode.Select) DrawSelect();
         else DrawHud();
+        DrawPads();
         DrawFloaters();
     }
 
@@ -807,20 +943,18 @@ public class Phase0Game : MonoBehaviour
             GUIStyle blurb = Style(15, new Color(0.35f, 0.24f, 0.18f), TextAnchor.UpperCenter);
             blurb.wordWrap = true;
             blurb.fontStyle = FontStyle.Normal;
-            GUI.Label(new Rect(card.x + 8, card.yMax - 132, card.width - 16, 32), Mascots.All[i].displayName, name);
-            GUI.Label(new Rect(card.x + 10, card.yMax - 98, card.width - 20, 52), Mascots.All[i].blurb, blurb);
-            GUI.backgroundColor = new Color(0.9f, 0.42f, 0.28f);
-            if (GUI.Button(new Rect(card.x + 18, card.yMax - 42, card.width - 36, 32), "Play  [" + keys[i] + "]"))
+            GUI.Label(new Rect(card.x + 8, card.yMax - 118, card.width - 16, 32), Mascots.All[i].displayName, name);
+            GUI.Label(new Rect(card.x + 10, card.yMax - 84, card.width - 20, 44), Mascots.All[i].blurb, blurb);
+            GUIStyle tap = Style(18, new Color(0.55f, 0.22f, 0.14f), TextAnchor.LowerCenter);
+            GUI.Label(new Rect(card.x + 8, card.yMax - 36, card.width - 16, 28), "Tap  ·  " + keys[i], tap);
+            if (GUI.Button(card, GUIContent.none, GUIStyle.none))
                 StartMatch(i);
-            GUI.backgroundColor = Color.white;
         }
 
         GUIStyle hint = Style(16, new Color(1f, 0.95f, 0.88f), TextAnchor.UpperCenter);
         hint.fontStyle = FontStyle.Normal;
-        GUI.Label(new Rect(40, h - 78, w - 80, 64),
-            "Move  A/D or arrows     Jump  W / Up / Space     Hit  F / J / K / S / Down\n" +
-            "Low hit bumps. High grounded hit sets. Jump and hit to spike. Jump at the net to block.\n" +
-            "Click the Game view once so the keyboard reaches the match.",
+        GUI.Label(new Rect(40, h - 56, w - 80, 48),
+            "Tap a mascot. Keyboard: 1 / 2 / 3.  In the match, hold ◀ ▶, tap JUMP and HIT.  Keys A/D, Space, F still work.",
             hint);
     }
 
@@ -849,13 +983,6 @@ public class Phase0Game : MonoBehaviour
             GUI.Label(new Rect(0, Screen.height * 0.2f + 52, w, 28), bannerSub, small);
         }
 
-        if (mode == Mode.Serve && serverSide < 0)
-            GUI.Label(new Rect(0, Screen.height * 0.72f, w, 32), "Press F to serve", big);
-
-        GUI.Label(new Rect(0, Screen.height - 36, w, 28),
-            "A/D move    Space jump    F hit    Esc mascots    First to 7, win by 2, cap 10",
-            small);
-
         if (mode == Mode.Done)
         {
             GUI.color = new Color(0.08f, 0.1f, 0.14f, 0.62f);
@@ -865,18 +992,26 @@ public class Phase0Game : MonoBehaviour
             string winner = you ? leftName : rightName;
             GUI.Label(new Rect(0, Screen.height * 0.32f, w, 60), winner + " takes the set", big);
             GUI.Label(new Rect(0, Screen.height * 0.32f + 64, w, 50), scoreL + "  –  " + scoreR, score);
+            GUIStyle choice = new GUIStyle(GUI.skin.button);
+            if (font != null) choice.font = font;
+            choice.fontSize = 22;
+            choice.fontStyle = FontStyle.Bold;
+            float bw = Mathf.Min(280f, w * 0.28f);
+            float bh = 64f;
+            float by = Screen.height * 0.58f;
             GUI.backgroundColor = new Color(0.9f, 0.42f, 0.28f);
-            float bw = 220f;
-            if (GUI.Button(new Rect(w * 0.5f - bw - 10, Screen.height * 0.55f, bw, 42), "Rematch  [R]")) Rematch();
+            if (GUI.Button(new Rect(w * 0.5f - bw - 12f, by, bw, bh), "Rematch", choice)) Rematch();
             GUI.backgroundColor = new Color(0.95f, 0.9f, 0.82f);
-            if (GUI.Button(new Rect(w * 0.5f + 10, Screen.height * 0.55f, bw, 42), "Change mascot  [M]"))
+            if (GUI.Button(new Rect(w * 0.5f + 12f, by, bw, bh), "Change mascot", choice))
                 mode = Mode.Select;
             GUI.backgroundColor = Color.white;
         }
         else
         {
+            Rect safe = Screen.safeArea;
+            float guiTop = Screen.height - safe.yMax;
             GUI.backgroundColor = new Color(1f, 1f, 1f, 0.7f);
-            if (GUI.Button(new Rect(12, 12, 130, 26), "Mascots"))
+            if (GUI.Button(new Rect(safe.xMin + 10f, guiTop + 10f, 148f, 44f), "Mascots"))
                 mode = Mode.Select;
             GUI.backgroundColor = Color.white;
         }
