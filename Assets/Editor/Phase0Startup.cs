@@ -2,6 +2,7 @@
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 // Opens the playable court once per editor session so Play is one click away.
 [InitializeOnLoad]

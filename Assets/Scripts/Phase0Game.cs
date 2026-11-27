@@ -57,7 +57,7 @@ public class Phase0Game : MonoBehaviour
     Sprite shadowSprite;
     Sprite flashSprite;
 
-    Sprite[,,] poses; // [mascot, pose]
+    Sprite[,] poses; // [mascot, pose]
     AudioSource audioSrc;
     AudioClip sndBump, sndSet, sndSpike, sndBlock, sndServe, sndPoint, sndUi;
     Font font;

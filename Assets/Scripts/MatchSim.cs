@@ -539,8 +539,8 @@ public class AiBrain
     {
         if (!ball.live)
         {
-            float home = ai.side * (ai.side == ball.serverSide ? 5.4f : 4.4f);
-            laggedX = Mathf.Lerp(laggedX, home, 1f - Mathf.Exp(-8f * dt));
+            float restX = ai.side * (ai.side == ball.serverSide ? 5.4f : 4.4f);
+            laggedX = Mathf.Lerp(laggedX, restX, 1f - Mathf.Exp(-8f * dt));
             ai.move = Mathf.Clamp((laggedX - ai.x) * 2.6f, -1f, 1f);
             return;
         }
