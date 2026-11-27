@@ -1,6 +1,6 @@
 # HK Pet Volleyball
 
-**Early review build.** Phase 0 is a side-view 1v1 arcade rally on a Hong Kong harbour rooftop. It is offline only: you pick a mascot and play a short set against the AI.
+**Early review build.** Phase 0 is a side-view 1v1 arcade rally. The court looks across Victoria Harbour: The Peak on one side, ICC on the other. It is offline only: you pick a mascot and play a short set against the AI.
 
 This project was assembled without a Unity Editor on the build machine. **Play Mode was not run.** The first time you press Play, you are the playtest.
 
@@ -41,8 +41,8 @@ On a phone, hold a move button with the left thumb and tap JUMP or HIT with the 
 
 The same button covers every touch. The pose and the ball decide the shot:
 
-- **Bump** — low ball, or the first touch. Pops the ball up on your side.
-- **Set** — ball is up, you are on the ground, and it is not your last touch. Places a high ball near the net.
+- **Bump** — low ball, or the first touch. Pops the ball up just in front of you and lets it hang, so the next pass is the same ball you are already under. The receive window is wide on purpose: press a little early or a little late and it still connects. You still have to be there and press hit. Missing the ball loses the point.
+- **Set** — ball is up, you are on the ground, and it is not your last touch. Lifts a high pass toward the net.
 - **Spike** — you are in the air and the ball is high. Drives it onto the other court. Closer to the sweet spot is faster and deeper.
 - **Block** — jump at the net against a smash.
 - **Last touch** that is not a spike or block sends a safe arc over the net.
@@ -63,7 +63,7 @@ Hand-drawn sticker sprites, not the reference photos.
 - **Miso** — orange tabby cap and back, white muzzle, chest, and paws, green-gold eyes. Slightly higher jump.
 - **Biscuit** — long low red-and-white Pembroke, large erect ears, white forehead blaze, white chest and paws, white rump patch. Faster, lower reach. No harness and no clothing.
 
-Poses in each file: idle, ready, bump, spike.
+Poses: idle, ready, run (two steps), jump, bump, and spike. Pose changes crossfade, and a jump stretches on the way up and squashes on landing, so the cats (and Biscuit) do not pop between still drawings.
 
 ## iPhone build
 

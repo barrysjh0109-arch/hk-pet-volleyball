@@ -58,6 +58,7 @@ public class Phase0Game : MonoBehaviour
     Sprite flashSprite;
 
     Sprite[,] poses; // [mascot, pose]
+    Sprite[] runAlt;
     AudioSource audioSrc;
     AudioClip sndBump, sndSet, sndSpike, sndBlock, sndServe, sndPoint, sndUi;
     Font font;
@@ -85,7 +86,12 @@ public class Phase0Game : MonoBehaviour
     class ActorView
     {
         public SpriteRenderer body;
+        public SpriteRenderer fade;
         public SpriteRenderer shadow;
+        public Sprite shown;
+        public float blend = 1f;
+        public bool wasGrounded = true;
+        public float land;
     }
 
     void Awake()
@@ -137,12 +143,13 @@ public class Phase0Game : MonoBehaviour
 
     void LoadArt()
     {
-        poses = new Sprite[3, 4];
-        string[] poseNames = { "idle", "ready", "bump", "spike" };
+        poses = new Sprite[3, 6];
+        runAlt = new Sprite[3];
+        string[] poseNames = { "idle", "ready", "bump", "spike", "run", "jump" };
         for (int m = 0; m < 3; m++)
         {
             string key = Mascots.All[m].spriteKey;
-            for (int p = 0; p < 4; p++)
+            for (int p = 0; p < poseNames.Length; p++)
             {
                 poses[m, p] = Resources.Load<Sprite>("Athletes/" + key + "_" + poseNames[p]);
                 if (poses[m, p] == null)
@@ -151,6 +158,8 @@ public class Phase0Game : MonoBehaviour
                     poses[m, p] = PlaceholderMascot(m);
                 }
             }
+            runAlt[m] = Resources.Load<Sprite>("Athletes/" + key + "_run2");
+            if (runAlt[m] == null) runAlt[m] = poses[m, (int)PoseKind.Run];
         }
         if (artMissing)
             Debug.LogWarning("HK Pet Volleyball: one or more athlete sprites failed to import. Placeholders are in use. Check the sprite import settings on Assets/Resources/Athletes.");
@@ -217,7 +226,9 @@ public class Phase0Game : MonoBehaviour
     {
         ActorView v = new ActorView();
         v.shadow = MakeSr(name + "Shadow", shadowSprite, 2);
+        v.fade = MakeSr(name + "Fade", PlaceholderMascot(0), 11);
         v.body = MakeSr(name, PlaceholderMascot(0), 12);
+        v.fade.enabled = false;
         return v;
     }
 
@@ -457,7 +468,7 @@ public class Phase0Game : MonoBehaviour
         if (mode == Mode.Serve && serverSide < 0 && hit)
             serveArmed = true;
         else if (player.hitLock <= 0f && hit)
-            player.hitBuffer = 0.16f;
+            player.hitBuffer = 0.32f;
     }
 
     static bool HitPressed()
@@ -530,6 +541,8 @@ public class Phase0Game : MonoBehaviour
 
         // Rally.
         brain.Think(cpu, ball, dt);
+        ball.MarkReach(player);
+        ball.MarkReach(cpu);
         ball.fault = false;
         ball.justHit = false;
         bool playerHit = ball.TryHit(player);
@@ -610,8 +623,10 @@ public class Phase0Game : MonoBehaviour
         if (mode == Mode.Select)
         {
             playerView.body.enabled = false;
+            playerView.fade.enabled = false;
             playerView.shadow.enabled = false;
             cpuView.body.enabled = false;
+            cpuView.fade.enabled = false;
             cpuView.shadow.enabled = false;
             specView.body.enabled = false;
             specView.shadow.enabled = false;
@@ -625,8 +640,8 @@ public class Phase0Game : MonoBehaviour
         for (int i = 0; i < trail.Length; i++) trail[i].enabled = true;
         playerView.body.enabled = true;
         cpuView.body.enabled = true;
-        PoseOn(playerView, player, 1f);
-        PoseOn(cpuView, cpu, 1f);
+        PoseOn(playerView, player, 1f, dt);
+        PoseOn(cpuView, cpu, 1f, dt);
         PoseSpectator();
 
         bool showBall = mode != Mode.Select && mode != Mode.Done || ball.live;
@@ -704,31 +719,73 @@ public class Phase0Game : MonoBehaviour
         }
     }
 
-    void PoseOn(ActorView view, Athlete a, float heightScale)
+    void PoseOn(ActorView view, Athlete a, float heightScale, float dt)
     {
         PoseKind pose = a.poseTimer > 0f ? a.pose : ChoosePose(a);
         Sprite sprite = SpriteFor(a.mascot, pose);
-        if (sprite == null) return;
-        view.body.sprite = sprite;
-        float h = Mascots.All[a.mascot].visualHeight * heightScale;
-        float squash = 1f;
-        if (a.grounded && a.vy == 0f && a.poseTimer > 0.12f && a.pose == PoseKind.Bump) squash = 0.92f;
-        Bounds b = sprite.bounds;
-        float scale = h / Mathf.Max(0.001f, b.size.y);
-        float sx = scale * a.Facing;
-        float sy = scale * squash;
-        view.body.transform.localScale = new Vector3(sx, sy, 1f);
-        float bob = a.grounded ? Mathf.Sin(Time.time * 5.5f + a.side * 2f) * 0.025f : 0f;
-        float floor = a.y + bob;
-        view.body.transform.position = new Vector3(
-            a.x - b.center.x * sx,
-            floor - b.min.y * sy,
-            0f);
+        if (pose == PoseKind.Run && runAlt != null && runAlt[a.mascot] != null && ((int)(Time.time * 8f) & 1) == 1)
+            sprite = runAlt[a.mascot];
+        if (sprite == null)
+        {
+            view.fade.enabled = false;
+            return;
+        }
+
+        if (view.shown != sprite)
+        {
+            bool runCycle = IsRunFrame(a.mascot, view.shown) && IsRunFrame(a.mascot, sprite);
+            if (view.shown != null && !runCycle)
+            {
+                view.fade.sprite = view.shown;
+                view.blend = 0f;
+            }
+            view.shown = sprite;
+        }
+        view.blend = Mathf.MoveTowards(view.blend, 1f, dt * 8f);
+
+        if (a.grounded && !view.wasGrounded) view.land = 1f;
+        view.wasGrounded = a.grounded;
+        view.land = Mathf.MoveTowards(view.land, 0f, dt * 5.5f);
+
+        float stretch = 1f + Mathf.Clamp(a.vy, -10f, 14f) * 0.012f;
+        float yMul = stretch * (1f - view.land * 0.12f);
+        float xMul = 1f / Mathf.Max(0.8f, yMul);
+        float bob = a.grounded ? Mathf.Sin(Time.time * 5.5f + a.side * 2f) * 0.03f : 0f;
+        PlaceActor(view.body, sprite, a, heightScale, xMul, yMul, bob, view.blend);
+        if (view.blend < 0.98f && view.fade.sprite != null)
+        {
+            view.fade.enabled = true;
+            PlaceActor(view.fade, view.fade.sprite, a, heightScale, xMul, yMul, bob, 1f - view.blend);
+        }
+        else view.fade.enabled = false;
+
         view.shadow.enabled = true;
         float lift = Mathf.Clamp01(a.y / 2.2f);
         view.shadow.transform.position = new Vector3(a.x, 0.03f, 0f);
         view.shadow.transform.localScale = new Vector3(0.95f + (1f - lift) * 0.3f, 0.28f, 1f) * (a.mascot == 2 ? 1.25f : 1f);
         view.shadow.color = new Color(0f, 0f, 0f, 0.35f * (1f - lift));
+    }
+
+    bool IsRunFrame(int mascot, Sprite sprite)
+    {
+        if (sprite == null || poses == null) return false;
+        return sprite == poses[mascot, (int)PoseKind.Run] || (runAlt != null && sprite == runAlt[mascot]);
+    }
+
+    static void PlaceActor(SpriteRenderer sr, Sprite sprite, Athlete a, float heightScale, float xMul, float yMul, float bob, float alpha)
+    {
+        sr.sprite = sprite;
+        sr.color = new Color(1f, 1f, 1f, alpha);
+        float h = Mascots.All[a.mascot].visualHeight * heightScale;
+        Bounds b = sprite.bounds;
+        float scale = h / Mathf.Max(0.001f, b.size.y);
+        float sx = scale * xMul * a.Facing;
+        float sy = scale * yMul;
+        sr.transform.localScale = new Vector3(sx, sy, 1f);
+        sr.transform.position = new Vector3(
+            a.x - b.center.x * sx,
+            a.y + bob - b.min.y * sy,
+            0f);
     }
 
     void PoseSpectator()
@@ -760,9 +817,10 @@ public class Phase0Game : MonoBehaviour
 
     PoseKind ChoosePose(Athlete a)
     {
-        if (!a.grounded) return PoseKind.Spike;
+        if (!a.grounded) return a.vy > -1.5f ? PoseKind.Jump : PoseKind.Spike;
+        if (Mathf.Abs(a.move) > 0.2f) return PoseKind.Run;
         bool ballHere = ball.live && ball.pos.x * a.side > -0.2f;
-        if (Mathf.Abs(a.move) > 0.15f || ballHere) return PoseKind.Ready;
+        if (ballHere) return PoseKind.Ready;
         return PoseKind.Idle;
     }
 
@@ -917,7 +975,7 @@ public class Phase0Game : MonoBehaviour
         GUIStyle title = Style(Mathf.RoundToInt(Mathf.Min(54f, w * 0.04f)), new Color(1f, 0.95f, 0.88f), TextAnchor.UpperCenter);
         GUIStyle sub = Style(Mathf.RoundToInt(Mathf.Min(22f, w * 0.018f)), new Color(0.75f, 0.9f, 0.88f), TextAnchor.UpperCenter);
         GUI.Label(new Rect(0, h * 0.05f, w, 64), "海旁排球", title);
-        GUI.Label(new Rect(0, h * 0.05f + 58, w, 36), "HK PET VOLLEYBALL  ·  HARBOUR ROOFTOP", sub);
+        GUI.Label(new Rect(0, h * 0.05f + 58, w, 36), "HK PET VOLLEYBALL  ·  THE PEAK  ·  ICC", sub);
         GUI.Label(new Rect(0, h * 0.05f + 92, w, 30), "Pick a mascot. The other two take the far side and the railing.", sub);
 
         float colW = Mathf.Min(300f, (w - 80f) / 3f);
@@ -925,7 +983,7 @@ public class Phase0Game : MonoBehaviour
         float total = colW * 3f + gap * 2f;
         float x0 = (w - total) * 0.5f;
         float y0 = h * 0.28f;
-        int shown = ((int)(Time.time * 1.3f)) % 4;
+        int shown = ((int)(Time.time * 1.3f)) % 6;
         string[] keys = { "1", "2", "3" };
         for (int i = 0; i < 3; i++)
         {

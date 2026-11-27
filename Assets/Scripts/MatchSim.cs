@@ -26,7 +26,9 @@ public enum PoseKind
     Idle,
     Ready,
     Bump,
-    Spike
+    Spike,
+    Run,
+    Jump
 }
 
 public struct MascotDef
@@ -56,7 +58,7 @@ public static class Mascots
             jumpV = 11.5f,
             reachX = 0.55f,
             reachY = 1.42f,
-            hitRadius = 1.10f,
+            hitRadius = 1.42f,
             visualHeight = 2.55f,
             netPad = 0.72f
         },
@@ -69,7 +71,7 @@ public static class Mascots
             jumpV = 12.05f,
             reachX = 0.52f,
             reachY = 1.36f,
-            hitRadius = 1.12f,
+            hitRadius = 1.45f,
             visualHeight = 2.48f,
             netPad = 0.74f
         },
@@ -82,7 +84,7 @@ public static class Mascots
             jumpV = 10.4f,
             reachX = 0.78f,
             reachY = 1.02f,
-            hitRadius = 1.20f,
+            hitRadius = 1.52f,
             visualHeight = 1.95f,
             netPad = 1.28f
         }
@@ -130,6 +132,7 @@ public class Athlete
     public bool jumpPressed;
     public float hitBuffer;
     public float hitLock;
+    public float rangeGrace;
     public float coyote;
     public float jumpBuffer;
     public PoseKind pose = PoseKind.Idle;
@@ -173,6 +176,7 @@ public class Athlete
 
         if (hitBuffer > 0f) hitBuffer -= dt;
         if (hitLock > 0f) hitLock -= dt;
+        if (rangeGrace > 0f) rangeGrace -= dt;
         if (poseTimer > 0f) poseTimer -= dt;
     }
 }
@@ -277,9 +281,10 @@ public class BallState
         if (!live || a.hitLock > 0f || a.hitBuffer <= 0f) return false;
         if (serveLock && a.side == serverSide) return false;
 
-        Vector2 hp = a.HitPoint;
-        float dist = Vector2.Distance(pos, hp);
-        if (dist > a.Def.hitRadius) return false;
+        float dist = HandleDistance(a);
+        float reach = a.Def.hitRadius;
+        bool grace = a.rangeGrace > 0.02f && dist <= reach * 1.25f;
+        if (dist > reach && !grace) return false;
 
         bool airborne = !a.grounded && (a.vy > 0.35f || a.y > 0.25f);
         bool nearNet = Mathf.Abs(a.x) < 1.85f;
@@ -306,7 +311,7 @@ public class BallState
             return true;
         }
 
-        float quality = Mathf.Clamp01(1f - Mathf.Max(0f, dist - 0.18f) / Mathf.Max(0.2f, a.Def.hitRadius - 0.18f));
+        float quality = Mathf.Clamp01(1f - Mathf.Max(0f, dist - 0.55f) / Mathf.Max(0.35f, a.Def.hitRadius));
         ShotKind shot;
         if (blockWindow) shot = ShotKind.Block;
         else if (airborne && pos.y > a.Def.reachY + 0.28f && (touchesNow >= 1 || pos.y > Tune.NetH + 0.05f))
@@ -318,6 +323,10 @@ public class BallState
 
         if (touchesNow + 1 >= Tune.MaxTouches && shot != ShotKind.Spike && shot != ShotKind.Block)
             shot = ShotKind.Clear;
+        // A receive or set should stay readable even when the contact is off-centre.
+        // Spikes still use the raw timing quality.
+        if (shot == ShotKind.Bump || shot == ShotKind.Set)
+            quality = Mathf.Max(quality, 0.78f);
 
         Apply(a, shot, quality);
         lastSide = a.side;
@@ -325,7 +334,7 @@ public class BallState
         serveLock = false;
         touchedNet = false;
         a.hitBuffer = 0f;
-        a.hitLock = 0.22f;
+        a.hitLock = (shot == ShotKind.Bump || shot == ShotKind.Set) ? 0.12f : 0.2f;
         a.pose = (shot == ShotKind.Spike || shot == ShotKind.Block) ? PoseKind.Spike : PoseKind.Bump;
         a.poseTimer = 0.24f;
         justHit = true;
@@ -382,14 +391,44 @@ public class BallState
             return;
         }
 
-        float targetAbs = shot == ShotKind.Set ? 1.28f : 3.15f;
-        float apex = shot == ShotKind.Set ? 4.95f + quality * 0.3f : 4.15f + quality * 0.4f;
-        float ownX = a.side * targetAbs;
-        if (shot == ShotKind.Bump && Mathf.Abs(Mathf.Abs(a.x) - targetAbs) < 0.85f)
-            ownX = a.side * 2.05f;
-        float arriveY = shot == ShotKind.Set ? 2.05f : 1.3f;
+        float ownX;
+        float apex;
+        float arriveY;
+        if (shot == ShotKind.Set)
+        {
+            // A pass toward the net, high enough to hang for the next touch.
+            ownX = a.side * 1.45f;
+            apex = 5.25f;
+            arriveY = 2.15f;
+        }
+        else
+        {
+            // Receive pops the ball up just in front of the athlete, so the
+            // next pass is the same ball they are already standing under.
+            ownX = a.x + a.Facing * 0.65f;
+            float near = a.side < 0 ? -1.15f : 1.15f;
+            float deep = a.side < 0 ? Tune.CourtMin + 0.9f : Tune.CourtMax - 0.9f;
+            ownX = Mathf.Clamp(ownX, Mathf.Min(near, deep), Mathf.Max(near, deep));
+            apex = 5.45f;
+            arriveY = 1.95f;
+        }
         vel = SolveApex(pos, ownX, apex, arriveY);
+        if (vel.y < 9.2f) vel.y = 9.2f;
         CapSpeed();
+    }
+
+    public void MarkReach(Athlete a)
+    {
+        if (!live) return;
+        if (HandleDistance(a) <= a.Def.hitRadius * 1.2f)
+            a.rangeGrace = 0.2f;
+    }
+
+    float HandleDistance(Athlete a)
+    {
+        float dx = pos.x - a.x;
+        float dy = pos.y - (a.y + a.Def.reachY);
+        return Mathf.Sqrt(dx * dx + dy * dy * 0.62f);
     }
 
     void CapSpeed()
